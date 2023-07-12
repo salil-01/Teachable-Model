@@ -1,63 +1,96 @@
 const videoElement = document.getElementById("video");
 const resultElement = document.getElementById("result");
-async function setupCamera() {
-  const constraints = {
-    video: { width: 640, height: 480 },
-  };
+const liveStatsElement = document.getElementById("live-stats");
+const startButton = document.getElementById("startButton");
+const stopButton = document.getElementById("stopButton");
+const videoContainer = document.getElementById("video-container");
 
+let model,
+  isPredicting = false;
+let videoStream;
+const constraints = { video: { width: 480, height: 360 } };
+
+async function setupCamera() {
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    videoElement.srcObject = stream;
+    videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+    videoElement.srcObject = videoStream;
     return new Promise((resolve) => {
       videoElement.onloadedmetadata = () => {
         resolve(videoElement);
       };
     });
   }
-
   return null;
 }
 
-async function run() {
+async function loadModel() {
   const URL = "https://teachablemachine.withgoogle.com/models/YDrxrSxDO/"; // Replace with your model's URL
-  const model = await tmImage.load(URL + "model.json", URL + "metadata.json");
-  let maxPredictions = model.getTotalClasses();
+  model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+}
 
-  await setupCamera();
-  videoElement.play();
-
-  setInterval(async () => {
+async function predict() {
+  while (isPredicting) {
     const prediction = await model.predict(videoElement);
 
-    // Get the top prediction
-    console.log(prediction);
-    const maxxValue = Math.max(
-      prediction[0].probability,
-      prediction[1].probability,
-      prediction[2].probability
-    );
-    console.log(maxxValue);
-    const topPrediction = prediction[0];
+    // Display the live probabilities for all classes
+    let liveStats = "";
+    prediction.forEach((pred, idx) => {
+      liveStats += `<p>${idx + 1}. ${pred.className} : ${Math.round(
+        pred.probability * 100
+      )}%</p>`;
+    });
+    liveStatsElement.innerHTML = liveStats;
 
-    // Display the label and probability
-    for (let i = 0; i < maxPredictions; i++) {
-      const classPrediction =
-        prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+    // Get the top prediction with the highest probability
+    const topPrediction = prediction.reduce((prev, current) => {
+      return prev.probability > current.probability ? prev : current;
+    });
+
+    if (!isPredicting) {
+      // Display only the highest probability class when stopped
+      resultElement.innerHTML = `<p>=> ${topPrediction.className}</p>`;
     }
-
-    // Update the predefined text based on the prediction
-    let text = "";
-    if (topPrediction.className === "person with mobile") {
-      text = "A mobile is good to carry";
-    } else {
-      // Add more cases for other classes if needed
-      text = "Predefined text for other classes";
-    }
-
-    // Display the predefined text
-    // Replace 'predefined-text-element' with the actual element ID where you want to display the text
-    document.getElementById("predefined-text-element").innerText = text;
-  }, 100);
+  }
 }
+
+function startPrediction() {
+  isPredicting = true;
+  startButton.disabled = true;
+  startButton.classList.add("hidden");
+  stopButton.classList.remove("hidden");
+  stopButton.disabled = false;
+  videoContainer.classList.add("active");
+  setupCamera()
+    .then(() => {
+      videoElement.play();
+      predict();
+    })
+    .catch((error) => console.error("Error accessing camera:", error));
+}
+
+function stopPrediction() {
+  isPredicting = false;
+  startButton.disabled = false;
+  startButton.classList.remove("hidden");
+  stopButton.classList.add("hidden");
+  stopButton.disabled = true;
+  videoElement.pause();
+  videoElement.srcObject = null;
+  if (videoStream) {
+    videoStream.getTracks().forEach((track) => track.stop());
+  }
+  resultElement.innerText = "";
+  liveStatsElement.innerHTML = "";
+  videoContainer.classList.remove("active");
+}
+
+function run() {
+  startButton.addEventListener("click", startPrediction);
+  stopButton.addEventListener("click", stopPrediction);
+  loadModel().catch((error) => console.error("Error loading model:", error));
+}
+
+// Show "Click on Start" initially
+videoContainer.classList.remove("active");
 
 run();
